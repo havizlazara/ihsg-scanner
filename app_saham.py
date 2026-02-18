@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import os
 
 # --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="IHSG DI Crossover Scanner", layout="wide")
+st.set_page_config(page_title="Bismillah Cuan", layout="wide")
 
 # --- PARAMETER TEKNIKAL ---
 DI_LENGTH = 3
