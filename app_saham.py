@@ -1,165 +1,120 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import yfinance as yf
-import cloudscraper
-import json
 from datetime import datetime, timedelta
 import os
-
 # --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="IHSG Pro - Frequency Fix", layout="wide")
-
+st.set_page_config(page_title="IHSG DI Crossover Scanner", layout="wide")
+# --- PARAMETER TEKNIKAL ---
+DI_LENGTH = 3
+DI_SMOOTHING = 3
+RSI_PERIOD = 3
 # ===============================================
-# FUNGSI SCRAPING FREKUENSI (ULTIMATE VERSION)
+# FUNGSI INDIKATOR DML (Directional Movement)
 # ===============================================
-
-def get_idx_frequency_data(target_date):
-    """Mengambil data frekuensi dengan penanganan blokir yang lebih kuat."""
-    date_str = target_date.strftime('%Y%m%d')
-    url = f"https://www.idx.co.id/primary/TradingSummary/GetStockSummary?date={date_str}&start=0&length=1000"
+def calculate_indicators(df):
+    close = df['Close']
+    high = df['High']
+    low = df['Low']
     
-    # Inisialisasi scraper dengan browser yang lebih modern
-    scraper = cloudscraper.create_scraper(
-        browser={
-            'browser': 'chrome',
-            'platform': 'windows',
-            'desktop': True
-        }
-    )
-    
-    try:
-        # Menambahkan header referer agar terlihat seperti akses dari website resmi
-        headers = {
-            'Referer': 'https://www.idx.co.id/id/data-pasar/ringkasan-perdagangan/ringkasan-saham/',
-            'Accept': 'application/json, text/javascript, */*; q=0.01',
-            'X-Requested-With': 'XMLHttpRequest'
-        }
-        
-        response = scraper.get(url, headers=headers, timeout=20)
-        
-        if response.status_code == 200:
-            raw_json = response.json()
-            if 'data' in raw_json and raw_json['data']:
-                # Mapping Kode Saham ke Frekuensi
-                return {item['StockCode']: item['Frequency'] for item in raw_json['data']}
-            else:
-                st.sidebar.warning("Data IDX kosong untuk tanggal ini (mungkin hari libur).")
-        else:
-            st.sidebar.error(f"IDX memblokir akses (Status: {response.status_code})")
-            
-    except Exception as e:
-        st.sidebar.error(f"Gagal koneksi ke server IDX: {e}")
-    
-    return {}
-
-# ===============================================
-# FUNGSI INDIKATOR TEKNIKAL (DI 3,3)
-# ===============================================
-
-def calculate_technical(df):
-    close, high, low = df['Close'], df['High'], df['Low']
-    length = 3
-    
-    # DI Calculation
+    # 1. Perhitungan DI (Directional Indicator)
     tr = pd.concat([high - low, abs(high - close.shift(1)), abs(low - close.shift(1))], axis=1).max(axis=1)
-    atr = tr.ewm(alpha=1/length, adjust=False).mean()
-    up, down = high - high.shift(1), low.shift(1) - low
+    atr = tr.ewm(alpha=1/DI_LENGTH, adjust=False).mean()
     
-    p_di = 100 * (pd.Series(np.where((up > down) & (up > 0), up, 0), index=df.index).ewm(alpha=1/length, adjust=False).mean() / atr)
-    m_di = 100 * (pd.Series(np.where((down > up) & (down > 0), down, 0), index=df.index).ewm(alpha=1/length, adjust=False).mean() / atr)
+    up_move = high - high.shift(1)
+    down_move = low.shift(1) - low
     
-    # RSI 3
-    diff = close.diff()
-    gain = (diff.where(diff > 0, 0)).ewm(com=2, adjust=False).mean()
-    loss = (-diff.where(diff < 0, 0)).ewm(com=2, adjust=False).mean()
-    rsi = 100 - (100 / (1 + (gain/loss)))
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
     
-    return p_di, m_di, rsi, close.ewm(span=50, adjust=False).mean()
-
+    df['plus_DI'] = 100 * (pd.Series(plus_dm, index=df.index).ewm(alpha=1/DI_LENGTH, adjust=False).mean() / atr)
+    df['minus_DI'] = 100 * (pd.Series(minus_dm, index=df.index).ewm(alpha=1/DI_LENGTH, adjust=False).mean() / atr)
+    
+    # 2. RSI 3 & EMA 50
+    df['RSI_3'] = (close.diff().where(close.diff() > 0, 0).ewm(com=RSI_PERIOD-1, adjust=False).mean() / 
+                  abs(close.diff().where(close.diff() < 0, 0)).ewm(com=RSI_PERIOD-1, adjust=False).mean()).pipe(lambda rs: 100 - (100 / (1 + rs)))
+    
+    df['EMA50'] = close.ewm(span=50, adjust=False).mean()
+    df['Pct_Change'] = close.pct_change() * 100
+    
+    return df
 # ===============================================
-# UI DASHBOARD
+# LOGIKA SESSION STATE
 # ===============================================
-
-st.title("📈 IHSG Scanner - Real Frequency")
-
-if 'cache_results' not in st.session_state:
-    st.session_state.cache_results = None
-
-st.sidebar.header("⚙️ Pengaturan")
-# IDX data biasanya update malam hari, gunakan H-1 atau H-2
-default_date = datetime.now() - timedelta(days=1)
-if default_date.weekday() == 6: # Minggu
-    default_date -= timedelta(days=2)
-elif default_date.weekday() == 5: # Sabtu
-    default_date -= timedelta(days=1)
-
-target_date = st.sidebar.date_input("Tanggal Analisa", default_date)
-btn_run = st.sidebar.button("🚀 Mulai Scan")
-
+if 'raw_data' not in st.session_state:
+    st.session_state.raw_data = None
+# ===============================================
+# UI UTAMA
+# ===============================================
+st.title("🏹 IHSG DI Crossover Strategy")
+st.sidebar.header("📡 Kontrol Analisa")
+target_date = st.sidebar.date_input("Tanggal Analisa", datetime.now())
+btn_run = st.sidebar.button("Jalankan Analisa Baru")
 FILE_NAME = 'daftar_saham (2).csv'
-
 if btn_run:
     if not os.path.exists(FILE_NAME):
-        st.error(f"File {FILE_NAME} tidak ditemukan!")
+        st.error(f"File `{FILE_NAME}` tidak ditemukan!")
     else:
-        with st.spinner("Menghubungi Server IDX & Yahoo Finance..."):
-            # 1. Ambil Data Frekuensi
-            freq_map = get_idx_frequency_data(target_date)
+        with st.spinner("Menganalisa Sinyal DI Crossover..."):
+            df_file = pd.read_csv(FILE_NAME)
+            all_tickers = [str(t).strip() + ".JK" for t in df_file["Ticker"].tolist()]
             
-            # 2. Baca Ticker
-            tickers = pd.read_csv(FILE_NAME)['Ticker'].tolist()
+            results = []
+            progress_bar = st.progress(0)
+            start_dt = target_date - timedelta(days=365)
+            end_dt = target_date + timedelta(days=1)
             
-            final_list = []
-            progress = st.progress(0)
-            
-            for i, t in enumerate(tickers):
+            for i, ticker in enumerate(all_tickers):
                 try:
-                    ticker = t.strip()
-                    # Download Technical Data
-                    data = yf.download(f"{ticker}.JK", start=target_date - timedelta(days=365), end=target_date + timedelta(days=1), progress=False)
+                    data = yf.download(ticker, start=start_dt, end=end_dt, progress=False, auto_adjust=True)
+                    if data.empty or len(data) < 50: continue
+                    if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
                     
-                    if not data.empty and len(data) > 10:
-                        if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
-                        
-                        p_di, m_di, rsi, ema50 = calculate_technical(data)
-                        curr, prev = data.iloc[-1], data.iloc[-2]
-                        
-                        # Sinyal Logic
-                        is_cross = (p_di.iloc[-1] > m_di.iloc[-1]) and (p_di.iloc[-2] <= m_di.iloc[-2])
-                        f_val = freq_map.get(ticker, 0)
-                        
-                        final_list.append({
-                            'Ticker': ticker,
-                            'Harga': int(curr['Close']),
-                            '%_Change': round(((curr['Close']/prev['Close'])-1)*100, 2),
-                            'Frekuensi': f_val,
-                            'Sinyal_DI': "BULLISH CROSS" if is_cross else "Neutral",
-                            'EMA50': "Above" if curr['Close'] > ema50.iloc[-1] else "Below",
-                            'RSI_3': round(rsi.iloc[-1], 2),
-                            '_cross': is_cross,
-                            '_ema': curr['Close'] > ema50.iloc[-1],
-                            '_rsi30': (rsi.iloc[-1] > 30 and rsi.iloc[-2] <= 30)
-                        })
+                    data = calculate_indicators(data)
+                    curr, prev = data.iloc[-1], data.iloc[-2]
+                    
+                    # Logika DI Crossover (+DI memotong ke atas -DI)
+                    di_cross_up = (curr['plus_DI'] > curr['minus_DI']) and (prev['plus_DI'] <= prev['minus_DI'])
+                    
+                    results.append({
+                        'Ticker': ticker.replace('.JK', ''),
+                        'Harga': round(curr['Close'], 0),
+                        '%_Chg': round(curr['Pct_Change'], 2),
+                        '+DI': round(curr['plus_DI'], 2),
+                        '-DI': round(curr['minus_DI'], 2),
+                        'DI_Signal': "BULLISH CROSS" if di_cross_up else "Netral",
+                        'EMA50_Pos': "Above" if curr['Close'] > curr['EMA50'] else "Below",
+                        'RSI_3': round(curr['RSI_3'], 2),
+                        # Hidden Filters
+                        '_di_cross': di_cross_up,
+                        '_ema_above': curr['Close'] > curr['EMA50'],
+                        '_rsi_30': (curr['RSI_3'] > 30 and prev['RSI_3'] <= 30)
+                    })
                 except: continue
-                progress.progress((i + 1) / len(tickers))
+                progress_bar.progress((i + 1) / len(all_tickers))
             
-            st.session_state.cache_results = pd.DataFrame(final_list)
-
-# --- FILTER HEADER ---
-if st.session_state.cache_results is not None:
-    st.divider()
-    c1, c2, c3, c4 = st.columns(4)
-    with c1: f1 = st.checkbox("DI Cross Up Only")
-    with c2: f2 = st.checkbox("Above EMA 50 Only")
-    with c3: f3 = st.checkbox("RSI Cross 30 Only")
-    with c4: min_f = st.number_input("Min. Frekuensi", value=0, step=100)
-
-    res = st.session_state.cache_results.copy()
-    if f1: res = res[res['_cross']]
-    if f2: res = res[res['_ema']]
-    if f3: res = res[res['_rsi30']]
-    res = res[res['Frekuensi'] >= min_f]
-
-    st.write(f"Menampilkan {len(res)} saham.")
-    st.dataframe(res.drop(columns=['_cross', '_ema', '_rsi30']), hide_index=True, use_container_width=True)
+            st.session_state.raw_data = pd.DataFrame(results)
+# --- HEADER FILTER (INSTAN Tanpa Loading) ---
+if st.session_state.raw_data is not None:
+    st.markdown("---")
+    st.subheader("🔍 Filter Hasil Analisa")
+    
+    c1, c2, c3 = st.columns(3)
+    with c1: f_di = st.checkbox("Hanya +DI Cross Up -DI")
+    with c2: f_ema = st.checkbox("Hanya Harga > EMA 50")
+    with c3: f_rsi = st.checkbox("Hanya RSI Cross Up 30")
+    df_filtered = st.session_state.raw_data.copy()
+    
+    if f_di: df_filtered = df_filtered[df_filtered['_di_cross'] == True]
+    if f_ema: df_filtered = df_filtered[df_filtered['_ema_above'] == True]
+    if f_rsi: df_filtered = df_filtered[df_filtered['_rsi_30'] == True]
+    st.write(f"Menampilkan **{len(df_filtered)}** saham.")
+    
+    # Tampilkan kolom visual
+    show_cols = ['Ticker', 'Harga', '%_Chg', '+DI', '-DI', 'DI_Signal', 'EMA50_Pos', 'RSI_3']
+    st.dataframe(df_filtered[show_cols], hide_index=True, use_container_width=True)
+    
+    csv = df_filtered[show_cols].to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Download CSV", csv, "ihsg_di_scan.csv", "text/csv")
