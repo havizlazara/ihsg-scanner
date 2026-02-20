@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import os
 
 # --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Global Aggressive Scanner", layout="wide")
+st.set_page_config(page_title="Global Aggressive Scanner Pro", layout="wide")
 
 # --- PARAMETER TEKNIKAL ---
 DI_LENGTH = 3
@@ -38,30 +38,43 @@ def calculate_indicators(df):
     return df
 
 # ===============================================
-# FUNGSI PROSES SCANNING
+# FUNGSI PROSES SCANNING (DENGAN PENGECEKAN GAGAL)
 # ===============================================
 
 def run_market_scan(file_name, is_indo=True, target_date=None):
     if not os.path.exists(file_name):
         st.error(f"File `{file_name}` tidak ditemukan!")
-        return None
+        return None, []
 
     df_file = pd.read_csv(file_name)
-    raw_tickers = df_file["Ticker"].tolist()
+    raw_tickers = df_file["Ticker"].dropna().unique().tolist()
     
     results = []
+    failed_tickers = []
     progress_bar = st.progress(0)
-    start_dt = target_date - timedelta(days=365)
-    end_dt = target_date + timedelta(days=1)
+    
+    # Gunakan rentang waktu lebih lebar untuk EMA 50
+    start_dt = target_date - timedelta(days=400)
+    end_dt = target_date + timedelta(days=2)
 
     for i, t in enumerate(raw_tickers):
-        ticker = str(t).strip()
+        ticker = str(t).strip().upper()
         symbol = f"{ticker}.JK" if is_indo else ticker
 
         try:
-            data = yf.download(symbol, start=start_dt, end=end_dt, progress=False, auto_adjust=True)
-            if data.empty or len(data) < 50: continue
-            if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
+            # threads=False menghindari masalah koneksi pada scan masal
+            data = yf.download(symbol, start=start_dt, end=end_dt, progress=False, auto_adjust=True, threads=False)
+            
+            if data.empty:
+                failed_tickers.append({"Ticker": ticker, "Alasan": "Data Kosong / Ticker Salah"})
+                continue
+                
+            if len(data) < 50:
+                failed_tickers.append({"Ticker": ticker, "Alasan": "Data < 50 hari (Baru IPO)"})
+                continue
+            
+            if isinstance(data.columns, pd.MultiIndex): 
+                data.columns = data.columns.get_level_values(0)
             
             data = calculate_indicators(data)
             curr, prev = data.iloc[-1], data.iloc[-2]
@@ -81,10 +94,13 @@ def run_market_scan(file_name, is_indo=True, target_date=None):
                 '-DI': round(curr['minus_DI'], 2),
                 '_di': is_di_cross, '_ema': is_ema50, '_rsi': is_rsi30
             })
-        except: continue
+        except Exception as e:
+            failed_tickers.append({"Ticker": ticker, "Alasan": str(e)})
+            continue
+            
         progress_bar.progress((i + 1) / len(raw_tickers))
     
-    return pd.DataFrame(results)
+    return pd.DataFrame(results), failed_tickers
 
 # ===============================================
 # UI UTAMA DENGAN TABS
@@ -99,7 +115,9 @@ target_date = st.sidebar.date_input("Tanggal Analisa", datetime.now())
 # --- TAB INDONESIA ---
 with tab_indo:
     if st.button("🚀 Jalankan Scan IHSG"):
-        st.session_state.indo_data = run_market_scan('daftar_saham (2).csv', is_indo=True, target_date=target_date)
+        data_indo, fail_indo = run_market_scan('daftar_saham (2).csv', is_indo=True, target_date=target_date)
+        st.session_state.indo_data = data_indo
+        st.session_state.indo_fail = fail_indo
 
     if 'indo_data' in st.session_state and st.session_state.indo_data is not None:
         st.markdown("### Filter IHSG")
@@ -113,15 +131,19 @@ with tab_indo:
         if f_ema: df = df[df['_ema']]
         if f_rsi: df = df[df['_rsi']]
         
-        # INFO JUMLAH SAHAM SETELAH FILTER
-        st.info(f"Ditemukan **{len(df)}** saham yang memenuhi kriteria dari total {len(st.session_state.indo_data)} saham.")
-        
+        st.info(f"Menampilkan **{len(df)}** saham dari total {len(st.session_state.indo_data)} yang berhasil di-scan.")
         st.dataframe(df.drop(columns=['_di','_ema','_rsi']), hide_index=True, use_container_width=True)
+
+        if st.session_state.indo_fail:
+            with st.expander("⚠️ Lihat Ticker IHSG yang Gagal"):
+                st.table(pd.DataFrame(st.session_state.indo_fail))
 
 # --- TAB US MARKET ---
 with tab_us:
     if st.button("🚀 Jalankan Scan US"):
-        st.session_state.us_data = run_market_scan('saham_us.csv', is_indo=False, target_date=target_date)
+        data_us, fail_us = run_market_scan('saham_us.csv', is_indo=False, target_date=target_date)
+        st.session_state.us_data = data_us
+        st.session_state.us_fail = fail_us
 
     if 'us_data' in st.session_state and st.session_state.us_data is not None:
         st.markdown("### Filter US Market")
@@ -135,7 +157,9 @@ with tab_us:
         if f_ema_us: df_us = df_us[df_us['_ema']]
         if f_rsi_us: df_us = df_us[df_us['_rsi']]
         
-        # INFO JUMLAH SAHAM SETELAH FILTER
-        st.info(f"Ditemukan **{len(df_us)}** saham yang memenuhi kriteria dari total {len(st.session_state.us_data)} saham.")
-        
+        st.info(f"Menampilkan **{len(df_us)}** saham dari total {len(st.session_state.us_data)} yang berhasil di-scan.")
         st.dataframe(df_us.drop(columns=['_di','_ema','_rsi']), hide_index=True, use_container_width=True)
+
+        if st.session_state.us_fail:
+            with st.expander("⚠️ Lihat Ticker US yang Gagal"):
+                st.table(pd.DataFrame(st.session_state.us_fail))
