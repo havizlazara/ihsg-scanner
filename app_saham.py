@@ -49,7 +49,7 @@ if 'raw_data' not in st.session_state:
 # UI UTAMA
 # ===============================================
 st.title("🏹 Bismillah Cuan")
-st.sidebar.header("📡 Masukan tanggal)
+st.sidebar.header("📡 Masukan tanggal")
 target_date = st.sidebar.date_input("Tanggal Analisa", datetime.now())
 btn_run = st.sidebar.button("Jalankan Analisa")
 FILE_NAME = 'daftar_saham (2).csv'
