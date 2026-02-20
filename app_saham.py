@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import os
 
 # --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Multi-Market Scanner", layout="wide")
+st.set_page_config(page_title="Global Aggressive Scanner", layout="wide")
 
 # --- PARAMETER TEKNIKAL ---
 DI_LENGTH = 3
@@ -19,7 +19,7 @@ RSI_PERIOD = 3
 def calculate_indicators(df):
     close, high, low = df['Close'], df['High'], df['Low']
     
-    # 1. DI Crossover (3,3)
+    # DI Crossover (3,3)
     tr = pd.concat([high - low, abs(high - close.shift(1)), abs(low - close.shift(1))], axis=1).max(axis=1)
     atr = tr.ewm(alpha=1/DI_LENGTH, adjust=False).mean()
     up_move, down_move = high - high.shift(1), low.shift(1) - low
@@ -27,7 +27,7 @@ def calculate_indicators(df):
     df['plus_DI'] = 100 * (pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0), index=df.index).ewm(alpha=1/DI_LENGTH, adjust=False).mean() / atr)
     df['minus_DI'] = 100 * (pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0), index=df.index).ewm(alpha=1/DI_LENGTH, adjust=False).mean() / atr)
     
-    # 2. RSI 3 & EMA 50
+    # RSI 3 & EMA 50
     diff = close.diff()
     gain = (diff.where(diff > 0, 0)).ewm(com=RSI_PERIOD-1, adjust=False).mean()
     loss = (-diff.where(diff < 0, 0)).ewm(com=RSI_PERIOD-1, adjust=False).mean()
@@ -56,10 +56,7 @@ def run_market_scan(file_name, is_indo=True, target_date=None):
 
     for i, t in enumerate(raw_tickers):
         ticker = str(t).strip()
-        if is_indo and not ticker.endswith(".JK"):
-            symbol = f"{ticker}.JK"
-        else:
-            symbol = ticker
+        symbol = f"{ticker}.JK" if is_indo else ticker
 
         try:
             data = yf.download(symbol, start=start_dt, end=end_dt, progress=False, auto_adjust=True)
@@ -96,17 +93,16 @@ def run_market_scan(file_name, is_indo=True, target_date=None):
 st.title("🌎 Global Market Aggressive Scanner")
 tab_indo, tab_us = st.tabs(["🇮🇩 IHSG Market", "🇺🇸 US Market"])
 
-# --- SIDEBAR GLOBAL ---
 st.sidebar.header("📡 Command Center")
 target_date = st.sidebar.date_input("Tanggal Analisa", datetime.now())
 
 # --- TAB INDONESIA ---
 with tab_indo:
-    st.subheader("Indonesia Stock Exchange (BEI)")
     if st.button("🚀 Jalankan Scan IHSG"):
         st.session_state.indo_data = run_market_scan('daftar_saham (2).csv', is_indo=True, target_date=target_date)
 
     if 'indo_data' in st.session_state and st.session_state.indo_data is not None:
+        st.markdown("### Filter IHSG")
         c1, c2, c3 = st.columns(3)
         f_di = c1.checkbox("Filter DI Cross Up (IHSG)")
         f_ema = c2.checkbox("Filter Above EMA 50 (IHSG)")
@@ -117,15 +113,18 @@ with tab_indo:
         if f_ema: df = df[df['_ema']]
         if f_rsi: df = df[df['_rsi']]
         
+        # INFO JUMLAH SAHAM SETELAH FILTER
+        st.info(f"Ditemukan **{len(df)}** saham yang memenuhi kriteria dari total {len(st.session_state.indo_data)} saham.")
+        
         st.dataframe(df.drop(columns=['_di','_ema','_rsi']), hide_index=True, use_container_width=True)
 
 # --- TAB US MARKET ---
 with tab_us:
-    st.subheader("US Stock Exchange (NYSE/NASDAQ)")
     if st.button("🚀 Jalankan Scan US"):
         st.session_state.us_data = run_market_scan('saham_us.csv', is_indo=False, target_date=target_date)
 
     if 'us_data' in st.session_state and st.session_state.us_data is not None:
+        st.markdown("### Filter US Market")
         c1, c2, c3 = st.columns(3)
         f_di_us = c1.checkbox("Filter DI Cross Up (US)")
         f_ema_us = c2.checkbox("Filter Above EMA 50 (US)")
@@ -135,5 +134,8 @@ with tab_us:
         if f_di_us: df_us = df_us[df_us['_di']]
         if f_ema_us: df_us = df_us[df_us['_ema']]
         if f_rsi_us: df_us = df_us[df_us['_rsi']]
+        
+        # INFO JUMLAH SAHAM SETELAH FILTER
+        st.info(f"Ditemukan **{len(df_us)}** saham yang memenuhi kriteria dari total {len(st.session_state.us_data)} saham.")
         
         st.dataframe(df_us.drop(columns=['_di','_ema','_rsi']), hide_index=True, use_container_width=True)
