@@ -6,7 +6,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 import os
 # --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="IHSG DI Crossover Scanner", layout="wide")
+st.set_page_config(page_title="Bismillah Cuan", layout="wide")
 # --- PARAMETER TEKNIKAL ---
 DI_LENGTH = 3
 DI_SMOOTHING = 3
@@ -48,16 +48,16 @@ if 'raw_data' not in st.session_state:
 # ===============================================
 # UI UTAMA
 # ===============================================
-st.title("🏹 IHSG DI Crossover Strategy")
-st.sidebar.header("📡 Kontrol Analisa")
+st.title("🏹 Bismillah Cuan")
+st.sidebar.header("📡 Masukan tanggal)
 target_date = st.sidebar.date_input("Tanggal Analisa", datetime.now())
-btn_run = st.sidebar.button("Jalankan Analisa Baru")
+btn_run = st.sidebar.button("Jalankan Analisa")
 FILE_NAME = 'daftar_saham (2).csv'
 if btn_run:
     if not os.path.exists(FILE_NAME):
         st.error(f"File `{FILE_NAME}` tidak ditemukan!")
     else:
-        with st.spinner("Menganalisa Sinyal DI Crossover..."):
+        with st.spinner("Menganalisa Sinyal ..."):
             df_file = pd.read_csv(FILE_NAME)
             all_tickers = [str(t).strip() + ".JK" for t in df_file["Ticker"].tolist()]
             
