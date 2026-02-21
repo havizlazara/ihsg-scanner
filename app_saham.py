@@ -38,7 +38,7 @@ def calculate_indicators(df):
     return df
 
 # ===============================================
-# FUNGSI PROSES SCANNING (DENGAN PENGECEKAN GAGAL)
+# FUNGSI PROSES SCANNING
 # ===============================================
 
 def run_market_scan(file_name, is_indo=True, target_date=None):
@@ -53,31 +53,38 @@ def run_market_scan(file_name, is_indo=True, target_date=None):
     failed_tickers = []
     progress_bar = st.progress(0)
     
-    # Gunakan rentang waktu lebih lebar untuk EMA 50
+    # Penyesuaian Tanggal: IHSG (WIB) vs US (EST/EDT)
+    # yfinance 'end' date bersifat exclusive, jadi kita tambah 1 hari untuk IHSG agar data hari terpilih masuk.
+    # Untuk US, data biasanya baru update H-1 dari WIB karena perbedaan waktu.
     start_dt = target_date - timedelta(days=400)
-    end_dt = target_date + timedelta(days=2)
+    end_dt = target_date + timedelta(days=1)
 
     for i, t in enumerate(raw_tickers):
         ticker = str(t).strip().upper()
         symbol = f"{ticker}.JK" if is_indo else ticker
 
         try:
-            # threads=False menghindari masalah koneksi pada scan masal
             data = yf.download(symbol, start=start_dt, end=end_dt, progress=False, auto_adjust=True, threads=False)
             
             if data.empty:
-                failed_tickers.append({"Ticker": ticker, "Alasan": "Data Kosong / Ticker Salah"})
+                failed_tickers.append({"Ticker": ticker, "Alasan": "Data Tidak Ditemukan"})
                 continue
                 
             if len(data) < 50:
-                failed_tickers.append({"Ticker": ticker, "Alasan": "Data < 50 hari (Baru IPO)"})
+                failed_tickers.append({"Ticker": ticker, "Alasan": "Data Terlalu Sedikit (<50)"})
                 continue
             
             if isinstance(data.columns, pd.MultiIndex): 
                 data.columns = data.columns.get_level_values(0)
             
             data = calculate_indicators(data)
-            curr, prev = data.iloc[-1], data.iloc[-2]
+            
+            # Pastikan mengambil baris terakhir yang valid
+            curr = data.iloc[-1]
+            prev = data.iloc[-2]
+            
+            # Tampilkan informasi tanggal data terakhir di log/sidebar untuk verifikasi
+            last_date_str = data.index[-1].strftime('%Y-%m-%d')
             
             is_di_cross = (curr['plus_DI'] > curr['minus_DI']) and (prev['plus_DI'] <= prev['minus_DI'])
             is_ema50 = curr['Close'] > curr['EMA50']
@@ -85,6 +92,7 @@ def run_market_scan(file_name, is_indo=True, target_date=None):
             
             results.append({
                 'Ticker': ticker,
+                'Tgl_Data': last_date_str,
                 'Harga': round(curr['Close'], 2),
                 '%_Change': round(curr['Pct_Change'], 2),
                 'DI_Signal': "BULLISH CROSS" if is_di_cross else "Netral",
@@ -109,18 +117,24 @@ def run_market_scan(file_name, is_indo=True, target_date=None):
 st.title("🌎 Global Market Aggressive Scanner")
 tab_indo, tab_us = st.tabs(["🇮🇩 IHSG Market", "🇺🇸 US Market"])
 
-st.sidebar.header("📡 Command Center")
-target_date = st.sidebar.date_input("Tanggal Analisa", datetime.now())
+# --- SIDEBAR TERPISAH ---
+st.sidebar.header("📡 Market Settings")
+
+# Default IHSG hari ini atau hari kerja terakhir
+today = datetime.now()
+st.sidebar.subheader("Tanggal Analisa")
+target_date_indo = st.sidebar.date_input("IHSG (WIB)", today, key='date_indo')
+target_date_us = st.sidebar.date_input("US Market (EST)", today - timedelta(days=1), key='date_us')
 
 # --- TAB INDONESIA ---
 with tab_indo:
+    st.markdown(f"**Analisa IHSG untuk tanggal: {target_date_indo}**")
     if st.button("🚀 Jalankan Scan IHSG"):
-        data_indo, fail_indo = run_market_scan('daftar_saham (2).csv', is_indo=True, target_date=target_date)
+        data_indo, fail_indo = run_market_scan('daftar_saham (2).csv', is_indo=True, target_date=target_date_indo)
         st.session_state.indo_data = data_indo
         st.session_state.indo_fail = fail_indo
 
     if 'indo_data' in st.session_state and st.session_state.indo_data is not None:
-        st.markdown("### Filter IHSG")
         c1, c2, c3 = st.columns(3)
         f_di = c1.checkbox("Filter DI Cross Up (IHSG)")
         f_ema = c2.checkbox("Filter Above EMA 50 (IHSG)")
@@ -131,22 +145,18 @@ with tab_indo:
         if f_ema: df = df[df['_ema']]
         if f_rsi: df = df[df['_rsi']]
         
-        st.info(f"Menampilkan **{len(df)}** saham dari total {len(st.session_state.indo_data)} yang berhasil di-scan.")
+        st.info(f"Ditemukan **{len(df)}** saham (Data Terakhir: {df['Tgl_Data'].iloc[0] if not df.empty else 'N/A'})")
         st.dataframe(df.drop(columns=['_di','_ema','_rsi']), hide_index=True, use_container_width=True)
-
-        if st.session_state.indo_fail:
-            with st.expander("⚠️ Lihat Ticker IHSG yang Gagal"):
-                st.table(pd.DataFrame(st.session_state.indo_fail))
 
 # --- TAB US MARKET ---
 with tab_us:
+    st.markdown(f"**Analisa US Market untuk tanggal: {target_date_us}**")
     if st.button("🚀 Jalankan Scan US"):
-        data_us, fail_us = run_market_scan('saham_us.csv', is_indo=False, target_date=target_date)
+        data_us, fail_us = run_market_scan('saham_us.csv', is_indo=False, target_date=target_date_us)
         st.session_state.us_data = data_us
         st.session_state.us_fail = fail_us
 
     if 'us_data' in st.session_state and st.session_state.us_data is not None:
-        st.markdown("### Filter US Market")
         c1, c2, c3 = st.columns(3)
         f_di_us = c1.checkbox("Filter DI Cross Up (US)")
         f_ema_us = c2.checkbox("Filter Above EMA 50 (US)")
@@ -157,9 +167,5 @@ with tab_us:
         if f_ema_us: df_us = df_us[df_us['_ema']]
         if f_rsi_us: df_us = df_us[df_us['_rsi']]
         
-        st.info(f"Menampilkan **{len(df_us)}** saham dari total {len(st.session_state.us_data)} yang berhasil di-scan.")
+        st.info(f"Ditemukan **{len(df_us)}** saham (Data Terakhir: {df_us['Tgl_Data'].iloc[0] if not df_us.empty else 'N/A'})")
         st.dataframe(df_us.drop(columns=['_di','_ema','_rsi']), hide_index=True, use_container_width=True)
-
-        if st.session_state.us_fail:
-            with st.expander("⚠️ Lihat Ticker US yang Gagal"):
-                st.table(pd.DataFrame(st.session_state.us_fail))
