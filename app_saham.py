@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import os
 
 # --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Global Aggressive Scanner Pro", layout="wide")
+st.set_page_config(page_title="SINYAL SEBELUM TERBANG", layout="wide")
 
 # --- PARAMETER TEKNIKAL ---
 DI_LENGTH = 3
