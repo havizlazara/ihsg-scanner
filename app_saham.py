@@ -106,7 +106,7 @@ def run_market_scan(file_name, is_indo=True, target_date=None):
 # UI UTAMA DENGAN TABS
 # ===============================================
 
-st.title("🌎 Global Market Aggressive Scanner")
+st.title("🌎 SINYAL SEBELUM TERBANG")
 tab_indo, tab_us = st.tabs(["🇮🇩 IHSG Market", "🇺🇸 US Market"])
 
 st.sidebar.header("📡 Market Settings")
