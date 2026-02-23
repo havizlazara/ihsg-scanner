@@ -53,9 +53,6 @@ def run_market_scan(file_name, is_indo=True, target_date=None):
     failed_tickers = []
     progress_bar = st.progress(0)
     
-    # Penyesuaian Tanggal: IHSG (WIB) vs US (EST/EDT)
-    # yfinance 'end' date bersifat exclusive, jadi kita tambah 1 hari untuk IHSG agar data hari terpilih masuk.
-    # Untuk US, data biasanya baru update H-1 dari WIB karena perbedaan waktu.
     start_dt = target_date - timedelta(days=400)
     end_dt = target_date + timedelta(days=1)
 
@@ -78,12 +75,7 @@ def run_market_scan(file_name, is_indo=True, target_date=None):
                 data.columns = data.columns.get_level_values(0)
             
             data = calculate_indicators(data)
-            
-            # Pastikan mengambil baris terakhir yang valid
-            curr = data.iloc[-1]
-            prev = data.iloc[-2]
-            
-            # Tampilkan informasi tanggal data terakhir di log/sidebar untuk verifikasi
+            curr, prev = data.iloc[-1], data.iloc[-2]
             last_date_str = data.index[-1].strftime('%Y-%m-%d')
             
             is_di_cross = (curr['plus_DI'] > curr['minus_DI']) and (prev['plus_DI'] <= prev['minus_DI'])
@@ -117,18 +109,14 @@ def run_market_scan(file_name, is_indo=True, target_date=None):
 st.title("🌎 Global Market Aggressive Scanner")
 tab_indo, tab_us = st.tabs(["🇮🇩 IHSG Market", "🇺🇸 US Market"])
 
-# --- SIDEBAR TERPISAH ---
 st.sidebar.header("📡 Market Settings")
-
-# Default IHSG hari ini atau hari kerja terakhir
 today = datetime.now()
-st.sidebar.subheader("Tanggal Analisa")
 target_date_indo = st.sidebar.date_input("IHSG (WIB)", today, key='date_indo')
 target_date_us = st.sidebar.date_input("US Market (EST)", today - timedelta(days=1), key='date_us')
 
 # --- TAB INDONESIA ---
 with tab_indo:
-    st.markdown(f"**Analisa IHSG untuk tanggal: {target_date_indo}**")
+    st.markdown(f"**Analisa IHSG: {target_date_indo}**")
     if st.button("🚀 Jalankan Scan IHSG"):
         data_indo, fail_indo = run_market_scan('daftar_saham (2).csv', is_indo=True, target_date=target_date_indo)
         st.session_state.indo_data = data_indo
@@ -145,12 +133,19 @@ with tab_indo:
         if f_ema: df = df[df['_ema']]
         if f_rsi: df = df[df['_rsi']]
         
-        st.info(f"Ditemukan **{len(df)}** saham (Data Terakhir: {df['Tgl_Data'].iloc[0] if not df.empty else 'N/A'})")
-        st.dataframe(df.drop(columns=['_di','_ema','_rsi']), hide_index=True, use_container_width=True)
+        st.info(f"Ditemukan **{len(df)}** saham.")
+        
+        # PENGATURAN HEIGHT AGAR TABEL PANJANG KE BAWAH
+        st.dataframe(
+            df.drop(columns=['_di','_ema','_rsi']), 
+            hide_index=True, 
+            use_container_width=True,
+            height=800  # <--- Nilai ini membuat tabel memanjang (dalam pixel)
+        )
 
 # --- TAB US MARKET ---
 with tab_us:
-    st.markdown(f"**Analisa US Market untuk tanggal: {target_date_us}**")
+    st.markdown(f"**Analisa US Market: {target_date_us}**")
     if st.button("🚀 Jalankan Scan US"):
         data_us, fail_us = run_market_scan('saham_us.csv', is_indo=False, target_date=target_date_us)
         st.session_state.us_data = data_us
@@ -167,5 +162,12 @@ with tab_us:
         if f_ema_us: df_us = df_us[df_us['_ema']]
         if f_rsi_us: df_us = df_us[df_us['_rsi']]
         
-        st.info(f"Ditemukan **{len(df_us)}** saham (Data Terakhir: {df_us['Tgl_Data'].iloc[0] if not df_us.empty else 'N/A'})")
-        st.dataframe(df_us.drop(columns=['_di','_ema','_rsi']), hide_index=True, use_container_width=True)
+        st.info(f"Ditemukan **{len(df_us)}** saham.")
+        
+        # PENGATURAN HEIGHT AGAR TABEL PANJANG KE BAWAH
+        st.dataframe(
+            df_us.drop(columns=['_di','_ema','_rsi']), 
+            hide_index=True, 
+            use_container_width=True,
+            height=800  # <--- Nilai ini membuat tabel memanjang (dalam pixel)
+        )
