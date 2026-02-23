@@ -120,7 +120,6 @@ with tab_indo:
     if st.button("🚀 Jalankan Scan IHSG"):
         data_indo, fail_indo = run_market_scan('daftar_saham (2).csv', is_indo=True, target_date=target_date_indo)
         st.session_state.indo_data = data_indo
-        st.session_state.indo_fail = fail_indo
 
     if 'indo_data' in st.session_state and st.session_state.indo_data is not None:
         c1, c2, c3 = st.columns(3)
@@ -135,12 +134,15 @@ with tab_indo:
         
         st.info(f"Ditemukan **{len(df)}** saham.")
         
-        # PENGATURAN HEIGHT AGAR TABEL PANJANG KE BAWAH
+        # LOGIKA TINGGI DINAMIS
+        # Minimal 150px, Maksimal 800px, atau sesuai jumlah baris
+        dynamic_height = min(max(len(df) * 35 + 100, 150), 800)
+        
         st.dataframe(
             df.drop(columns=['_di','_ema','_rsi']), 
             hide_index=True, 
             use_container_width=True,
-            height=800  # <--- Nilai ini membuat tabel memanjang (dalam pixel)
+            height=dynamic_height
         )
 
 # --- TAB US MARKET ---
@@ -149,7 +151,6 @@ with tab_us:
     if st.button("🚀 Jalankan Scan US"):
         data_us, fail_us = run_market_scan('saham_us.csv', is_indo=False, target_date=target_date_us)
         st.session_state.us_data = data_us
-        st.session_state.us_fail = fail_us
 
     if 'us_data' in st.session_state and st.session_state.us_data is not None:
         c1, c2, c3 = st.columns(3)
@@ -164,10 +165,12 @@ with tab_us:
         
         st.info(f"Ditemukan **{len(df_us)}** saham.")
         
-        # PENGATURAN HEIGHT AGAR TABEL PANJANG KE BAWAH
+        # LOGIKA TINGGI DINAMIS
+        dynamic_height_us = min(max(len(df_us) * 35 + 100, 150), 800)
+        
         st.dataframe(
             df_us.drop(columns=['_di','_ema','_rsi']), 
             hide_index=True, 
             use_container_width=True,
-            height=800  # <--- Nilai ini membuat tabel memanjang (dalam pixel)
+            height=dynamic_height_us
         )
